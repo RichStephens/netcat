@@ -14,6 +14,9 @@
 #include "net.h"
 #include "cocotext.h"
 
+#define PIA2_REG0 ((uint8_t *) 0xFF20)
+#define PIA2_REG1 (PIA2_REG0 + 1)
+
 uint16_t bytesWaiting;
 unsigned char conn;
 unsigned char error;
@@ -25,6 +28,47 @@ void presskey(void)
 {
     printf("PRESS ANY KEY TO CLOSE...\n");
     waitkey(0);
+}
+
+void setup_cd_flag()
+{
+    uint8_t val, prev;
+
+    val = *PIA2_REG1;
+    val &= 0xFC; // Disable FIRQ, flag on falling edge (CD off to on)
+    val |= 2;    // flag on rising edge (CD on to off)
+    *PIA2_REG1 = val;
+    (void)*PIA2_REG0; // Clear the CD flag}
+
+#if 0
+  for (prev = 0;; prev = val) {
+    val = *PIA2_REG1;
+    if (val != prev) {
+      printf("%02x\n", val);
+      (void) *PIA2_REG0; // Clear the CD flag
+    }
+  }
+#endif
+
+    return;
+}
+
+bool check_cd_flag()
+{
+    bool avail = false;
+
+    // Check if data is available
+    if ((*PIA2_REG1) & 0x80)
+    {
+        while ((*PIA2_REG1) & 0x80)
+        {
+            (void)*PIA2_REG0; // Clear the CD flag
+            avail = true;
+            break;
+        }
+    }
+    
+    return avail;
 }
 
 int open_connection(void)
@@ -61,31 +105,36 @@ void close_connection(void)
 
 byte in(void)
 {
-    network_status(url, &bytesWaiting, &conn, &error);
+    error = 1; // Assume we're good.  Until we aren't.
 
-    if (!bytesWaiting)
+    if (check_cd_flag())
     {
         network_status(url, &bytesWaiting, &conn, &error);
-        return fn_error(error);
-    }
-    else if (bytesWaiting > sizeof(rxBuf))
-    {
-        bytesWaiting = sizeof(rxBuf);
-    }
-    
-    network_read(url, rxBuf, bytesWaiting);
 
-    putchar('\x08'); // backspace cursor
-    
-    for (int i=0;i<bytesWaiting;i++)
-    {
-        char c = rxBuf[i];
+        if (!bytesWaiting)
+        {
+            network_status(url, &bytesWaiting, &conn, &error);
+            return fn_error(error);
+        }
+        else if (bytesWaiting > sizeof(rxBuf))
+        {
+            bytesWaiting = sizeof(rxBuf);
+        }
 
-        if (c != 0x0A)
-            putchar(c);
+        network_read(url, rxBuf, bytesWaiting);
+
+        putchar('\x08'); // backspace cursor
+
+        for (int i = 0; i < bytesWaiting; i++)
+        {
+            char c = rxBuf[i];
+
+            if (c != 0x0A)
+                putchar(c);
+        }
+
+        putchar(0xAF); // cursor.
     }
-
-    putchar(0xAF); // cursor.
 
     return fn_error(error);
 }
@@ -191,7 +240,9 @@ int main(void)
         return 1;
     }
 
-    network_status(url, &bytesWaiting, &conn, &error);
+    setup_cd_flag();
+
+    //network_status(url, &bytesWaiting, &conn, &error);
 
     while(nc() == 1);
     
